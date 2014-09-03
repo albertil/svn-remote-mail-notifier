@@ -3,26 +3,20 @@ use strict;
 use utf8;
 use MIME::Lite;
 use Cwd 'abs_path';
+use Getopt::Long;
+use Email::Valid;
 
 my $installPath = abs_path($0);
 ($installPath) = $installPath =~ /^(.+\/).*$/m;
 
 our $revFile = $installPath . "rev.cfg";
 
-############################
-# Config stuff
-# TODO: Use getopts
-############################
-my $repoUrl='your-repo-url-goes-there';
-my $smtpServer='your-repo-url-goes-there';
+our $repoUrl='';
+our $smtpServer='';
 our $senderEmail='svn-notifier@noreply.org';
-our $recipientEmail='your.email@goes.there';
-our $debug=1;
-
-############################
-
-#Use odin as smtp server
-MIME::Lite->send('smtp', $smtpServer);
+our $recipientEmail='';
+our $debug=0;
+our $help=0;
 
 sub getDatepattern {
     my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime;
@@ -46,6 +40,7 @@ sub info {
     my ($message) = @_;
     print getDatepattern . " : [INFO] : $message\n";
 }
+
 
 ##################################################
 # Logs a message and die
@@ -85,6 +80,50 @@ sub writeRevFile {
     print FILEHANDLER "$rev\n";
     close(FILEHANDLER);
 }
+
+##################################################
+# print usage
+sub usage {
+    print 'svn-remote-mail-notifier.pl --url=<repository_url> --smtp=<smtp_server> --recipient=<recipient_email_address> [--sender=<sender_email_address>] [--debug] [--help]
+
+    --help: displays this help and exits    
+    --url: The SVN repository url
+    --smtp: SMTP server used to send mail
+    --recipient: TO email address
+    --sender: FROM email address (optional defaults to "svn-notifier@noreply.org")
+    --debug: toggle debug logs on
+
+';
+}
+
+##################################################
+# Complains against missing parameter
+# params:
+#	param1: the missing parameter
+sub missingMandatoryParam {
+    my ($param) = @_;
+    print getDatepattern . " : [FATAL] : Missing mandatory parameter \"$param\"\n";
+    usage();
+    exit(1);
+}
+
+##################################################
+# Main program
+
+
+GetOptions ('help!' => \$help, 'debug!' => \$debug, 'url=s' => \$repoUrl, 'smtp=s' => \$smtpServer, 'sender=s' => \$senderEmail, 'recipient=s' => \$recipientEmail);
+
+$repoUrl ne '' or  missingMandatoryParam "url";
+$smtpServer ne '' or  missingMandatoryParam("smtp");;
+$recipientEmail ne '' or  missingMandatoryParam("recipient");;
+
+
+Email::Valid->address($senderEmail) or logAndDie "$senderEmail is an invalid email";
+Email::Valid->address($recipientEmail) or logAndDie "$recipientEmail is an invalid email";
+
+
+#Use odin as smtp server
+MIME::Lite->send('smtp', $smtpServer);
 
 info "starting svn checking process";
 my $result = `svn log $repoUrl -l 1` or logAndDie "SVN command failed: $!";
@@ -126,6 +165,7 @@ for (my $i = $latestKnownRev + 1; $i <= $latestRepoRev; $i++) {
     debug "-- " . $result . " --";
     #Get first path
     my ($path) = $result =~ m|$repoUrl(.*)$|m;
+    $path = "" unless defined $path;
     debug "-- " . $path . " --";
     $result .= "\n";
     $result .= `svn diff -c $i $repoUrl`;
